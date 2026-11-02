@@ -1,0 +1,6 @@
+# Deliberadamente vazio.
+#
+# O Tempest nao tem dependencia nenhuma — so a biblioteca padrao
+# do Python. Este arquivo existe porque e por ele que o Railway, o
+# Heroku e companhia reconhecem um projeto Python e sabem que
+# comando rodar. Se um dia aparecer uma linha aqui, foi engano.

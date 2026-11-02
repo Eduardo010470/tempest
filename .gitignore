@@ -19,3 +19,6 @@ bip340.csv
 
 # Patches de uma vez: aplicados e jogados fora
 patch_*.py
+
+# sobras de uma gravacao atomica interrompida
+*.tmp

@@ -28,6 +28,26 @@ Duas coisas que todo no de verdade faz, e este faz:
   lista com quem encontra. Voce apresenta ele a UM par; o resto ele
   descobre sozinho. E assim que uma rede cresce sem ninguem no centro.
 
+  SEMENTE. Um no recem-instalado nao conhece ninguem, e nao existe
+  jeito de descobrir por conta propria quem esta no ar. Entao a lista
+  comeca escrita no codigo: PARES_SEMENTE. E a unica parte de uma
+  blockchain que nao e matematica — um endereco que alguem precisa
+  manter de pe. O Bitcoin tem cinco desses e nunca conseguiu se livrar
+  de nenhum.
+
+  Mas repara no que o no semente NAO pode fazer. Nao pode mentir sobre
+  a cadeia, porque a genese e constante e a validacao e integral: se ele
+  mandar outra historia, ela e recusada. Nao pode inventar pares, porque
+  quem ele indica se apresenta sozinho ou nao e falado com. O pior que
+  um no semente consegue fazer e nao responder.
+
+Variaveis de ambiente, para rodar num servidor:
+    PORT                 a porta (o Railway e o Heroku definem sozinhos)
+    TEMPEST_EU           como este no se apresenta, se nao der para deduzir
+    TEMPEST_SEMENTE      pares semente extras, separados por virgula
+    TEMPEST_RODADA       segundos entre rodadas automaticas (0 desliga)
+    TEMPEST_DIR          pasta do estado, para um volume montado
+
 Uso:
     python3 no.py sou http://MEU_IP:5000     como eu me apresento
     python3 no.py servir 5000                poe este no no ar
@@ -41,13 +61,30 @@ Uso:
 import json
 import os
 import sys
+import threading
+import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cadeia as C
 
 ARQ_PARES = "pares.json"
 MAX_PARES = 40
+MAX_CORPO = 8 * 1024 * 1024      # teto do POST
+
+# Os nos que um no recem-instalado conhece sem ninguem apresentar.
+# Enquanto estiver vazio, cada no precisa de um 'conhecer' na mao.
+PARES_SEMENTE = [
+]
+PARES_SEMENTE += [p.strip() for p in
+                  os.environ.get("TEMPEST_SEMENTE", "").split(",") if p.strip()]
+
+# Uma tranca so, para a cadeia e para a fila. Enquanto o no atendia um
+# cliente de cada vez ela nao fazia falta. Agora faz: dois POST /cadeia
+# simultaneos leem o mesmo arquivo, decidem cada um por si, e o ultimo a
+# gravar apaga a decisao do outro. E reentrante porque decide() chama
+# junta_pendentes() por dentro, na reorganizacao.
+TRANCA = threading.RLock()
 
 
 def trabalho(cadeia):
@@ -71,7 +108,7 @@ def grava_pares(eu, lista):
         if p.startswith("http") and p != (eu or "") and p not in limpos:
             limpos.append(p)
     limpos = limpos[:MAX_PARES]
-    json.dump({"eu": eu, "pares": limpos}, open(ARQ_PARES, "w"), indent=1)
+    C.grava(ARQ_PARES, {"eu": eu, "pares": limpos})
     return limpos
 
 
@@ -87,6 +124,11 @@ def aprende_pares(novos, eu_deles=None):
 # --------------------------------------------------------------- consenso
 
 def junta_pendentes(vindas):
+    with TRANCA:
+        return _junta_pendentes(vindas)
+
+
+def _junta_pendentes(vindas):
     """Mistura a fila de fora com a minha, sem repetir e sem aceitar lixo.
 
     Tres filtros, e cada um existe por um motivo diferente. O primeiro
@@ -121,6 +163,11 @@ def junta_pendentes(vindas):
 
 
 def decide(forasteira):
+    with TRANCA:
+        return _decide(forasteira)
+
+
+def _decide(forasteira):
     """O coracao do consenso: so adota quem ganha em trabalho E e valida."""
     minha = C.carrega_cadeia()
     tm, tf = trabalho(minha), trabalho(forasteira)
@@ -186,6 +233,9 @@ class No(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
+        if n > MAX_CORPO:
+            # um Content-Length mentiroso derrubaria o processo por memoria
+            return self._envia(413, {"erro": "corpo grande demais"})
         try:
             corpo = json.loads(self.rfile.read(n))
         except Exception:
@@ -227,6 +277,25 @@ def conversa(par):
             "o_outro_adotou_a_minha": empurrei.get("adotou")}
 
 
+def laco_rodadas(intervalo):
+    """O no nao fica so esperando: tambem vai atras.
+
+    Um no que apenas atende e um mural — recebe o que empurram e nunca
+    busca. Basta perder uma conexao na hora errada para ficar atras e
+    nunca mais descobrir sozinho. Qualquer erro aqui e engolido de
+    proposito: a rodada e oportunista, e um par fora do ar nao e motivo
+    para derrubar o no.
+    """
+    time.sleep(5)
+    while True:
+        for p in list(carrega_pares()[1]):
+            try:
+                conversa(p)
+            except Exception:
+                pass
+        time.sleep(intervalo)
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "ajuda"
 
@@ -238,16 +307,49 @@ def main():
         print("use o IP que os outros alcancam, nao 127.0.0.1")
 
     elif cmd == "servir":
-        porta = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
-        C.carrega_cadeia()
+        if os.environ.get("TEMPEST_DIR"):
+            os.chdir(os.environ["TEMPEST_DIR"])
+        porta = int(os.environ.get("PORT")
+                    or (sys.argv[2] if len(sys.argv) > 2 else 5000))
+
+        # como este no se apresenta. num servidor isso nao pode ser
+        # digitado a mao, e o Railway publica o dominio no ambiente.
         eu, pares = carrega_pares()
+        eu = os.environ.get("TEMPEST_EU") or eu
+        dominio = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        if not eu and dominio:
+            eu = "https://" + dominio.strip().rstrip("/")
+        pares = grava_pares(eu, pares + PARES_SEMENTE)
+
+        c = C.carrega_cadeia()
+        if len(c) == 1 and pares:
+            # cadeia vazia e pares conhecidos: puxa antes de abrir a porta.
+            # um no recem-criado (ou que perdeu o disco) nao precisa de
+            # backup — a genese e constante, e a cadeia de verdade esta
+            # com quem tem mais trabalho.
+            for p in pares:
+                try:
+                    decide(busca(p, "/cadeia"))
+                except Exception:
+                    pass
+            c = C.carrega_cadeia()
+
         print("no %s no ar em http://0.0.0.0:%d  (ctrl-c para parar)"
               % (C.NOME, porta))
         print("me apresento como:", eu or "(nada — rode 'no.py sou URL')")
-        print("conheco %d par(es)" % len(pares))
+        print("conheco %d par(es), tenho %d bloco(s)" % (len(pares), len(c)))
         print("rotas: GET /estado /cadeia /pendentes /pares"
               " | POST /cadeia /pendentes /pares")
-        HTTPServer(("0.0.0.0", porta), No).serve_forever()
+
+        intervalo = int(os.environ.get("TEMPEST_RODADA", "0"))
+        if intervalo > 0:
+            threading.Thread(target=laco_rodadas, args=(intervalo,),
+                             daemon=True).start()
+            print("rodada automatica a cada %d s" % intervalo)
+
+        # Threading, nao HTTPServer: um cliente lento travava todos os
+        # outros, e com a rodada de fundo o no agora e cliente de si mesmo.
+        ThreadingHTTPServer(("0.0.0.0", porta), No).serve_forever()
 
     elif cmd == "conhecer":
         url = sys.argv[2].rstrip("/")
@@ -270,6 +372,9 @@ def main():
 
     elif cmd == "rodada":
         eu, pares = carrega_pares()
+        if not pares and PARES_SEMENTE:
+            pares = grava_pares(eu, PARES_SEMENTE)
+            print("nao conhecia ninguem; usei os pares semente do codigo.")
         if not pares:
             print("nao conheco ninguem ainda.")
             print("comece com: python3 no.py conhecer http://IP:PORTA")

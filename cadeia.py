@@ -79,9 +79,8 @@ def grava_carteira(frase):
     priv = semente.chave_de(frase)
     pub = schnorr.publica(priv)          # 32 bytes, x-only (BIP-340)
     end = curva.endereco(pub)
-    json.dump({"frase": frase, "priv": "%064x" % priv, "pub": pub.hex(),
-               "endereco": end}, open(ARQ_CARTEIRA, "w"), indent=2)
-    os.chmod(ARQ_CARTEIRA, 0o600)
+    grava(ARQ_CARTEIRA, {"frase": frase, "priv": "%064x" % priv,
+                         "pub": pub.hex(), "endereco": end}, segredo=True)
     return priv, pub, end
 
 
@@ -385,8 +384,37 @@ def carrega_cadeia():
     return c
 
 
+def grava(arquivo, dado, segredo=False):
+    """Grava trocando o arquivo, nunca escrevendo em cima dele.
+
+    `open(arquivo, "w")` trunca na hora. Se o processo morrer no meio —
+    deploy, falta de memoria, bateria — o que sobra no disco e um json
+    cortado, e o proximo json.load levanta erro. Um no que atende 24
+    horas morre assim e nao volta a subir sozinho.
+
+    Gravar num .tmp e trocar com os.replace e atomico no sistema de
+    arquivos: ou o arquivo antigo esta inteiro, ou o novo esta inteiro,
+    nunca um pedaco dos dois. E o mesmo cuidado dos patches deste
+    repositorio, pelo mesmo motivo.
+
+    Com segredo=True o arquivo NASCE 600. Antes a carteira era criada
+    com a permissao padrao e so depois virava 600 — havia um instante,
+    curto mas real, em que a chave privada estava legivel para qualquer
+    usuario da maquina.
+    """
+    tmp = arquivo + ".tmp"
+    if segredo:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        f = os.fdopen(fd, "w", encoding="utf-8")
+    else:
+        f = open(tmp, "w", encoding="utf-8")
+    with f:
+        json.dump(dado, f, indent=1)
+    os.replace(tmp, arquivo)
+
+
 def grava_cadeia(c):
-    json.dump(c, open(ARQ_CADEIA, "w"), indent=1)
+    grava(ARQ_CADEIA, c)
 
 
 def carrega_pendentes():
@@ -396,7 +424,7 @@ def carrega_pendentes():
 
 
 def grava_pendentes(p):
-    json.dump(p, open(ARQ_PENDENTES, "w"), indent=1)
+    grava(ARQ_PENDENTES, p)
 
 
 def saldos(cadeia):
