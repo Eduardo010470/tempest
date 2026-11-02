@@ -1,0 +1,12 @@
+# A CHAVE PRIVADA E A FRASE DE DOZE PALAVRAS. Nunca versionar.
+carteira.json
+carteira-*.json
+
+# Estado local do no: cada maquina tem o seu
+cadeia.json
+cadeia-*.json
+pendentes.json
+pares.json
+
+__pycache__/
+*.pyc
