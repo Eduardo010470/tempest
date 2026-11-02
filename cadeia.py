@@ -50,6 +50,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import curva
+import schnorr
 import semente
 
 NOME = "Tempest"
@@ -76,7 +77,7 @@ ARQ_PENDENTES = "pendentes.json"
 def grava_carteira(frase):
     """Escreve a carteira derivada da frase de doze palavras."""
     priv = semente.chave_de(frase)
-    pub = curva.chave_publica(priv)
+    pub = schnorr.publica(priv)          # 32 bytes, x-only (BIP-340)
     end = curva.endereco(pub)
     json.dump({"frase": frase, "priv": "%064x" % priv, "pub": pub.hex(),
                "endereco": end}, open(ARQ_CARTEIRA, "w"), indent=2)
@@ -88,6 +89,23 @@ def carrega_carteira():
     """Devolve (priv, pub, endereco, frase_recem_criada_ou_None)."""
     if os.path.exists(ARQ_CARTEIRA):
         d = json.load(open(ARQ_CARTEIRA))
+        if len(d["pub"]) != 64:
+            # carteira de antes do Schnorr: a chave publica tinha 64 bytes
+            # (x e y) e agora tem 32 (so o x). A chave PRIVADA nao muda, e
+            # a frase tambem nao — so o que se deriva delas. Refaco em vez
+            # de seguir com um arquivo que nao casa mais com o codigo.
+            if "frase" not in d:
+                raise SystemExit(
+                    "esta carteira e de antes do Schnorr e nao tem frase de\n"
+                    "doze palavras para refazer a chave publica. mova o\n"
+                    "%s de lado e crie outra." % ARQ_CARTEIRA)
+            antigo = d["endereco"]
+            priv, pub, end = grava_carteira(d["frase"])
+            print("carteira atualizada para Schnorr: a chave publica caiu de")
+            print("64 para 32 bytes e o endereco mudou junto.")
+            print("  antes:", antigo)
+            print("  agora:", end, "\n")
+            return priv, pub, end, None
         return (int(d["priv"], 16), bytes.fromhex(d["pub"]), d["endereco"],
                 None)
     frase = semente.gera_frase()
@@ -191,7 +209,7 @@ def id_tx(tx):
 def cria_tx(priv, pub, para, valor, taxa, seq):
     tx = {"de": pub.hex(), "para": para, "valor": valor, "taxa": taxa,
           "seq": seq, "quando": int(time.time())}
-    tx["assinatura"] = curva.assina(priv, corpo_tx(tx)).hex()
+    tx["assinatura"] = schnorr.assina(priv, corpo_tx(tx)).hex()
     return tx
 
 
@@ -203,9 +221,15 @@ def tx_valida(tx):
     if not isinstance(tx.get("seq"), int) or tx["seq"] < 0:
         return False
     pub = bytes.fromhex(tx["de"])
+    if len(pub) != 32:
+        return False
     if curva.endereco(pub) == tx["para"]:
         return False
-    return curva.confere(pub, corpo_tx(tx), bytes.fromhex(tx["assinatura"]))
+    # Schnorr, nao ECDSA. Para a cadeia nao muda nada: 64 bytes de
+    # assinatura contra 32 de chave. Mas essa chave pode ser a SOMA de
+    # varias, e quem confere nao tem como saber — e e exatamente por isso
+    # que a conta conjunta nao precisa de campo novo no bloco.
+    return schnorr.confere(pub, corpo_tx(tx), bytes.fromhex(tx["assinatura"]))
 
 
 def remetente(tx):
@@ -552,6 +576,75 @@ def main():
         print("transacao %d assinada e na fila (%d %s + %d de taxa)."
               % (seq, valor, SIMBOLO, taxa))
         print("quem minerar o proximo bloco fica com a taxa.")
+
+    elif cmd == "conjunta":
+        if len(sys.argv) < 3:
+            print("uso: python3 cadeia.py conjunta <chave publica do outro>")
+            print("\na sua, para mandar para ele:")
+            print("   " + pub.hex())
+            return
+        outra = bytes.fromhex(sys.argv[2])
+        if len(outra) != 32:
+            print("uma chave publica do Tempest tem 32 bytes (64 hex)."); return
+        qx, _, _ = schnorr.agrega([pub, outra])
+        end = curva.endereco(qx)
+        print("sua chave:   ", pub.hex())
+        print("a dele:      ", outra.hex())
+        print("conjunta:    ", qx.hex())
+        print("endereco:    ", end)
+        print("saldo:       ", saldos(cadeia).get(end, 0), SIMBOLO)
+        print("\nNinguem conhece a chave privada desse endereco — ela nao")
+        print("existe. Gastar de la exige os dois assinando junto, e a")
+        print("cadeia nao tem como saber que sao dois: o que ela ve e uma")
+        print("chave de 32 bytes e uma assinatura de 64, como qualquer outra.")
+
+    elif cmd == "enviar-conjunto":
+        if len(sys.argv) < 5:
+            print("uso: python3 cadeia.py enviar-conjunto <pasta do outro> "
+                  "<endereco> <valor> [taxa]")
+            print("\nA pasta do outro e onde esta o carteira.json dele.")
+            return
+        pasta, para, valor = sys.argv[2], sys.argv[3], int(sys.argv[4])
+        taxa = int(sys.argv[5]) if len(sys.argv) > 5 else 1
+        arq = os.path.join(pasta, ARQ_CARTEIRA)
+        if not os.path.exists(arq):
+            print("nao achei", arq); return
+        # ESTA e a parte artificial desta demonstracao: as duas chaves
+        # privadas num processo so. Na vida real cada dono tem a sua numa
+        # maquina diferente e o protocolo tem rodadas — e a ORDEM das
+        # rodadas e o que importa: os nonces tem que ser trocados ANTES de
+        # qualquer assinatura parcial, senao quem falar por ultimo escolhe
+        # o proprio nonce depois de ver os outros e forja a assinatura do
+        # grupo. E o mesmo padrao do ataque da chave forjada.
+        outro = json.load(open(arq))
+        priv_b = int(outro["priv"], 16)
+        pub_b = bytes.fromhex(outro["pub"])
+        qx, _, _ = schnorr.agrega([pub, pub_b])
+        de = curva.endereco(qx)
+        pend = carrega_pendentes()
+        gasto = sum(t["valor"] + t["taxa"] for t in pend if remetente(t) == de)
+        if saldos(cadeia).get(de, 0) - gasto < valor + taxa:
+            print("a conta conjunta tem %d TEMP livres e isso custa %d."
+                  % (saldos(cadeia).get(de, 0) - gasto, valor + taxa)); return
+        seq = (sequencias(cadeia).get(de, 0)
+               + sum(1 for t in pend if remetente(t) == de))
+        tx = {"de": qx.hex(), "para": para, "valor": valor, "taxa": taxa,
+              "seq": seq, "quando": int(time.time())}
+        qx2, sig = schnorr.assina_junto([priv, priv_b], corpo_tx(tx))
+        assert qx2 == qx
+        tx["assinatura"] = sig.hex()
+        if not tx_valida(tx):
+            print("a assinatura conjunta nao conferiu. nada foi enfileirado.")
+            return
+        pend.append(tx)
+        grava_pendentes(pend)
+        print("transacao %d da conta conjunta, assinada pelos dois." % seq)
+        print("de:   ", de)
+        print("para: ", para)
+        print("valor: %d %s + %d de taxa" % (valor, SIMBOLO, taxa))
+        print("\nassinatura:", sig.hex())
+        print("\n64 bytes. Uma. A cadeia vai conferi-la contra uma chave de")
+        print("32 bytes e aceitar, sem nunca saber que houve dois donos.")
 
     elif cmd == "pendentes":
         pend = carrega_pendentes()

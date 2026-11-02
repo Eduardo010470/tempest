@@ -149,7 +149,11 @@ def agrega(pubs):
     a = coeficientes(pubs)
     Q = None
     for p in sorted(pubs):
-        Q = curva.soma(Q, curva.multiplica(a[p], _ergue(p)))
+        ponto = _ergue(p)
+        if len(p) != 32 or ponto is None:
+            raise ValueError("chave de %d bytes que nao esta na curva: %s"
+                             % (len(p), p.hex()[:24]))
+        Q = curva.soma(Q, curva.multiplica(a[p], ponto))
     if Q is None:
         raise ValueError("soma deu o ponto no infinito")
     return Q[0].to_bytes(32, "big"), Q, a
