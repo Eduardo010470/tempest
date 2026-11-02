@@ -154,6 +154,63 @@ servidor se amarra em `127.0.0.1` e recusa qualquer cliente que não seja a
 própria máquina. O `no.py`, que atende a rede em `0.0.0.0`, não tem
 nenhuma rota que toque na chave.
 
+## A gênese é uma constante
+
+```python
+GENESE = {
+    "indice": 0,
+    "anterior": "4b21ebff…",   # sha256 do nome da rede
+    "raiz":     "e3b0c442…",   # Merkle de lista vazia
+    "quando":   1793577600,    # 2026-11-02T00:00:00Z
+    "nonce":    42837,         # minerado uma vez, aqui, e nunca mais
+    "hash":     "0000d4fd…",
+}
+```
+
+Antes disso cada instalação minerava a própria gênese com o próprio
+relógio, e duas máquinas nasciam com origens diferentes. A consequência
+não era a rede se dividir — era pior: a validação só conferia o campo
+`anterior`, então o nó com mais trabalho impunha a gênese dele e o outro
+perdia em silêncio os blocos que tinha minerado.
+
+Rede não se define por quem chega com mais trabalho. Define-se por uma
+origem comum. A validação agora compara o bloco zero campo a campo com a
+constante, e uma cadeia com outra gênese é recusada por mais trabalho que
+traga.
+
+## O cabeçalho é binário
+
+88 bytes de tamanho fixo, big-endian: índice 8, anterior 32, raiz 32,
+tempo 8, nonce 8. Sem `json`, sem ponto flutuante — o tempo é segundo
+inteiro.
+
+O motivo é consenso, não desempenho. Enquanto o hash saía de
+`json.dumps`, a identidade de um bloco dependia de como o serializador de
+uma linguagem escreve um número: o mesmo instante com uma casa decimal a
+mais dava outro hash, e dois nós honestos discordariam sem ninguém ter
+errado. Com campo de tamanho fixo, qualquer programa em qualquer
+linguagem chega ao mesmo hash — dá para conferir com `sha256sum` sobre os
+88 bytes crus, sem Python nenhum. As transações seguem a mesma regra: 116
+bytes fixos é o que a assinatura protege.
+
+## A semente em pedaços
+
+```bash
+python3 partilha.py repartir 3 5
+python3 partilha.py juntar <pedaço> <pedaço> <pedaço>
+python3 partilha.py provar
+```
+
+Partilha de Shamir sobre o corpo finito de 2^128 + 51, o menor primo
+acima dos 128 bits de entropia das doze palavras. O segredo vira o termo
+constante de um polinômio de grau k-1, e os pedaços são pontos da curva:
+k pontos determinam o polinômio, k-1 não determinam nada.
+
+E "nada" aqui é literal. Com k-1 pedaços, para cada segredo possível
+existe exatamente um polinômio que passa por aqueles pontos com aquele
+segredo — todos igualmente compatíveis. Não falta poder de cálculo,
+falta informação. `provar` mostra isso acontecendo com números.
+
 ## A semente de doze palavras
 
 A chave privada é um número de 256 bits. Perder o arquivo que a guarda é
@@ -221,6 +278,7 @@ ele acontece rápido o suficiente para você observar.
 | `no.py` | o nó HTTP, o consenso, a reorganização e a descoberta de pares |
 | `semente.py` | BIP-39: entropia → doze palavras → chave |
 | `tela.py` | a carteira no navegador, servida só para a própria máquina |
+| `partilha.py` | partilha de Shamir: a semente em pedaços |
 | `palavras.txt` | a lista oficial de 2048 palavras em português |
 
 Estado em disco, tudo ignorado pelo git:

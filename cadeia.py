@@ -146,8 +146,8 @@ def tempo_mediano(cadeia, indice):
     problemas piores para nos dar. E o mesmo remedio do Bitcoin.
     """
     if indice == 0:
-        return 0.0
-    janela = sorted(b["quando"] for b in
+        return 0
+    janela = sorted(int(b["quando"]) for b in
                     cadeia[max(0, indice - MEDIANA_N):indice])
     return janela[len(janela) // 2]
 
@@ -155,22 +155,42 @@ def tempo_mediano(cadeia, indice):
 # ------------------------------------------------------------- transacoes
 
 def corpo_tx(tx):
-    """Os campos que a assinatura protege. Fora daqui nada e garantido."""
-    return json.dumps({"de": tx["de"], "para": tx["para"], "valor": tx["valor"],
-                       "taxa": tx["taxa"], "seq": tx["seq"],
-                       "quando": tx["quando"]},
-                      sort_keys=True, separators=(",", ":")).encode()
+    """Os bytes exatos que a assinatura protege. 116 bytes, sempre.
+
+    NAO use json aqui. A forma canonica de uma transacao nao pode depender
+    de como o serializador de uma linguagem escreve um numero: outro
+    programa, em outra lingua, produziria bytes diferentes para a mesma
+    transacao e calcularia outro hash. Campo de tamanho fixo, big-endian,
+    e a mesma coisa em qualquer maquina que saiba contar.
+    """
+    return (bytes.fromhex(tx["de"])                    # 64: a chave publica
+            + bytes.fromhex(tx["para"])                # 20: o endereco
+            + tx["valor"].to_bytes(8, "big")
+            + tx["taxa"].to_bytes(8, "big")
+            + tx["seq"].to_bytes(8, "big")
+            + int(tx["quando"]).to_bytes(8, "big"))
 
 
 def id_tx(tx):
-    """A impressao digital da transacao inteira, assinatura incluida."""
-    return hashlib.sha256(json.dumps(tx, sort_keys=True,
-                                     separators=(",", ":")).encode()).hexdigest()
+    """A impressao digital da transacao inteira, assinatura incluida.
+
+    O primeiro byte diz o tipo, para que uma recompensa nunca possa ser
+    confundida com uma transacao assinada por mais parecidos que sejam os
+    campos restantes.
+    """
+    if tx["de"] is None:
+        corpo = (b"\x00"
+                 + bytes.fromhex(tx["para"])
+                 + tx["valor"].to_bytes(8, "big")
+                 + int(tx["quando"]).to_bytes(8, "big"))
+    else:
+        corpo = b"\x01" + corpo_tx(tx) + bytes.fromhex(tx["assinatura"])
+    return hashlib.sha256(corpo).hexdigest()
 
 
 def cria_tx(priv, pub, para, valor, taxa, seq):
     tx = {"de": pub.hex(), "para": para, "valor": valor, "taxa": taxa,
-          "seq": seq, "quando": time.time()}
+          "seq": seq, "quando": int(time.time())}
     tx["assinatura"] = curva.assina(priv, corpo_tx(tx)).hex()
     return tx
 
@@ -261,18 +281,33 @@ def confere_prova(identificador, caminho, raiz):
 
 # ----------------------------------------------------------------- blocos
 
+CABECALHO = 88          # 8 + 32 + 32 + 8 + 8
+
+
+def cabecalho_bytes(b):
+    """Os 88 bytes que a prova de trabalho protege. Sem json, sem float.
+
+    indice 8 | anterior 32 | raiz 32 | quando 8 | nonce 8
+
+    O tempo e segundo inteiro, nao ponto flutuante: o mesmo instante
+    escrito com uma casa decimal a mais daria outro hash, e dois nos
+    honestos discordariam sem ninguem ter errado.
+    """
+    return (b["indice"].to_bytes(8, "big")
+            + bytes.fromhex(b["anterior"])
+            + bytes.fromhex(b["raiz"])
+            + int(b["quando"]).to_bytes(8, "big")
+            + b["nonce"].to_bytes(8, "big"))
+
+
 def hash_bloco(b):
-    """O cabecalho, e so ele. As transacoes entram pela raiz de Merkle."""
-    corpo = json.dumps({k: b[k] for k in
-                        ("indice", "anterior", "quando", "raiz", "nonce")},
-                       sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(corpo).hexdigest()
+    return hashlib.sha256(cabecalho_bytes(b)).hexdigest()
 
 
-def minera_bloco(indice, anterior, transacoes, dificuldade, piso=0.0):
-    agora = time.time()
+def minera_bloco(indice, anterior, transacoes, dificuldade, piso=0):
+    agora = int(time.time())
     if agora <= piso:
-        agora = piso + 0.001          # respeita o piso do relogio
+        agora = piso + 1              # respeita o piso do relogio
     b = {"indice": indice, "anterior": anterior, "quando": agora,
          "raiz": raiz_merkle(transacoes), "transacoes": transacoes, "nonce": 0}
     alvo = "0" * dificuldade
@@ -284,16 +319,36 @@ def minera_bloco(indice, anterior, transacoes, dificuldade, piso=0.0):
         b["nonce"] += 1
 
 
-def genesis():
-    """O bloco zero carrega o nome da rede onde iria o hash anterior.
+# A GENESE E UMA CONSTANTE, nao um bloco minerado na hora.
+#
+# Antes disso cada maquina minerava a propria genese com o relogio dela,
+# e duas instalacoes nasciam com geneses diferentes. A consequencia nao
+# era a rede se dividir — era pior: `valida` so conferia o campo
+# `anterior`, entao o no com mais trabalho impunha a genese dele e o
+# outro perdia os blocos que tinha minerado, sem aviso.
+#
+# Rede nao e definida por quem chega com mais trabalho. E definida por
+# uma origem comum. No Bitcoin a genese e uma constante no codigo-fonte
+# desde 2009, e uma cadeia com outra genese e recusada por mais trabalho
+# que traga. Aqui tambem, agora.
+#
+# O campo `anterior`, onde nao ha bloco anterior para apontar, guarda o
+# sha256 do nome da rede. Satoshi usou esse espaco para a manchete do
+# Times de 3 de janeiro de 2009.
+GENESE = {
+    "indice": 0,
+    "anterior": "4b21ebff52639c9be4e81a54c99e17beb900b626e86bb482be1c06016b5d02b4",
+    "raiz": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "quando": 1793577600,          # 2026-11-02T00:00:00Z
+    "nonce": 42837,                # minerado uma vez, aqui, e nunca mais
+    "transacoes": [],
+    "hash": "0000d4fd8d4447688c6088930c5ed25c3eea7cba7098f2f470115a7da9239492",
+}
 
-    Nao existe bloco antes do primeiro. O Bitcoin usou esse espaco para
-    gravar a manchete do Times de 3 de janeiro de 2009. Aqui ele guarda a
-    identidade: duas redes com nomes diferentes tem genese diferente, logo
-    nunca aceitam blocos uma da outra, mesmo rodando este mesmo codigo.
-    """
-    return minera_bloco(0, hashlib.sha256(NOME.encode()).hexdigest(), [],
-                        DIF_INICIAL)
+
+def genesis():
+    """Devolve a genese da rede. Igual em toda maquina, sempre."""
+    return json.loads(json.dumps(GENESE))
 
 
 # ----------------------------------------------------------------- cadeia
@@ -335,9 +390,17 @@ def valida(cadeia):
     """Confere a cadeia inteira do zero. Devolve (ok, motivo)."""
     if not cadeia:
         return False, "cadeia vazia"
-    if cadeia[0]["anterior"] != hashlib.sha256(NOME.encode()).hexdigest():
-        return False, "genese de outra rede"
-    agora = time.time()
+    # A genese e conferida campo a campo contra a constante. Nao basta o
+    # `anterior` bater: o bloco zero inteiro tem que ser EXATAMENTE este,
+    # ou a cadeia e de outra rede e nao interessa quanto trabalho carrega.
+    g = cadeia[0]
+    for campo in ("indice", "anterior", "raiz", "quando", "nonce", "hash"):
+        if g.get(campo) != GENESE[campo]:
+            return False, ("a genese desta cadeia e de outra rede "
+                           "(difere em '%s')" % campo)
+    if g.get("transacoes") != []:
+        return False, "a genese nao pode ter transacoes"
+    agora = int(time.time())
     s, q = {}, {}
     for i, b in enumerate(cadeia):
         if b["indice"] != i:
@@ -522,7 +585,7 @@ def main():
         txs = list(aceitas)
         if premio > 0:
             txs.insert(0, {"de": None, "para": eu, "valor": premio, "taxa": 0,
-                           "seq": None, "quando": time.time(),
+                           "seq": None, "quando": int(time.time()),
                            "assinatura": None})
         dif = dificuldade_em(cadeia, i)
         t0 = time.time()
@@ -624,7 +687,7 @@ def main():
         i = len(cadeia) - 1
         b = cadeia[i]
         piso = tempo_mediano(cadeia, i)
-        falso = piso - 60.0
+        falso = piso - 60
         dif = dificuldade_em(cadeia, i)
         mentiroso = {"indice": i, "anterior": b["anterior"], "quando": falso,
                      "raiz": b["raiz"], "transacoes": b["transacoes"],

@@ -10,3 +10,6 @@ pares.json
 
 __pycache__/
 *.pyc
+
+# Pedacos da partilha de Shamir: tres deles sao a carteira inteira.
+pedaco-*.txt
