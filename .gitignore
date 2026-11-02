@@ -13,3 +13,6 @@ __pycache__/
 
 # Pedacos da partilha de Shamir: tres deles sao a carteira inteira.
 pedaco-*.txt
+
+# Vetores oficiais da BIP-340, baixados do repositorio das BIPs.
+bip340.csv
