@@ -1,12 +1,13 @@
 # Tempest
 
 Uma blockchain escrita do zero em Python, sem nenhuma dependência externa.
-Roda num celular Android, dentro do Termux, em 1225 linhas.
+Roda num celular Android, dentro do Termux, em 2493 linhas.
 
 O `pip install` nunca foi chamado neste projeto. Só a biblioteca padrão do
 Python: `hashlib`, `hmac`, `json`, `secrets`, `http.server`. A curva
-elíptica, a assinatura digital, a árvore de Merkle e a derivação da semente
-de doze palavras estão escritas aqui, à mão.
+elíptica, a assinatura de Schnorr, a árvore de Merkle, a partilha de um
+segredo e a derivação da semente de doze palavras estão escritas aqui, à
+mão.
 
 ## O que isto é, e o que não é
 
@@ -193,6 +194,59 @@ linguagem chega ao mesmo hash — dá para conferir com `sha256sum` sobre os
 88 bytes crus, sem Python nenhum. As transações seguem a mesma regra: 116
 bytes fixos é o que a assinatura protege.
 
+## As assinaturas são Schnorr
+
+```bash
+python3 schnorr.py vetores   # os 19 vetores oficiais da BIP-340
+python3 schnorr.py dois      # duas chaves somadas numa, e uma assinatura só
+python3 schnorr.py ataque    # a chave forjada, e a defesa
+```
+
+A cadeia assinava com ECDSA e passou ao Schnorr da
+[BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki),
+o mesmo que o Bitcoin adotou no Taproot em 2021. Os 19 vetores oficiais
+passam byte a byte, **incluindo os que têm que falhar** — chave fora da
+curva, `s` acima da ordem do grupo, nonce de paridade errada. Essa metade
+é a interessante: uma implementação que só aceita o que deve aceitar ainda
+não foi testada.
+
+A chave pública caiu de 64 bytes para 32. Só o `x` vai no bloco; dos dois
+`y` possíveis a convenção escolhe o par, e quem confere o recalcula
+resolvendo a equação da curva. Metade do espaço, nenhuma informação
+perdida.
+
+Mas o que o Schnorr tem e o ECDSA não tem é **linearidade**: somar duas
+assinaturas dá uma assinatura válida da soma das duas chaves. É daqui que
+sai a conta conjunta.
+
+## A conta conjunta
+
+```bash
+python3 cadeia.py conjunta <chave pública do outro>
+python3 cadeia.py enviar-conjunto <pasta do outro> <endereço> 40 3
+```
+
+Dois donos somam as chaves públicas, e o resultado é um endereço cuja
+chave privada **não existe** — nem eles a conhecem. Gastar de lá exige os
+dois assinando junto, e o que entra no bloco é uma chave de 32 bytes e uma
+assinatura de 64, iguais às de um dono só. A cadeia não ganhou campo novo,
+nem regra nova, e não tem como saber que a conta é de duas pessoas.
+
+Somar as chaves direto, porém, é um buraco. Se o Bob espera a chave do
+Alice e publica `Pb = x·G − Pa`, a soma vira `x·G` e ele assina sozinho
+pelos dois. A defesa é a da MuSig: cada chave entra multiplicada por um
+coeficiente que sai do hash da lista inteira, então ninguém pode escolher
+a sua depois de ver as outras. O `schnorr.py ataque` roda o ataque com a
+defesa e sem ela, lado a lado.
+
+Duas honestidades sobre o escopo. O `enviar-conjunto` lê as duas chaves
+privadas no mesmo processo, que é justamente o que na vida real não se faz:
+cada dono guarda a sua numa máquina e o protocolo tem rodadas, nas quais os
+nonces são trocados **antes** de qualquer assinatura parcial — senão quem
+falar por último escolhe o nonce depois de ver os outros, que é o mesmo
+padrão do ataque da chave forjada. E é 2-de-2, não k-de-n: não dá para
+gastar faltando um.
+
 ## A semente em pedaços
 
 ```bash
@@ -273,7 +327,8 @@ ele acontece rápido o suficiente para você observar.
 
 | | |
 |---|---|
-| `curva.py` | secp256k1 à mão: soma de pontos, multiplicação escalar, ECDSA |
+| `curva.py` | secp256k1 à mão: soma de pontos, multiplicação escalar, endereço |
+| `schnorr.py` | a assinatura da BIP-340 e a soma de chaves da MuSig |
 | `cadeia.py` | blocos, transações, Merkle, dificuldade, emissão, validação, CLI |
 | `no.py` | o nó HTTP, o consenso, a reorganização e a descoberta de pares |
 | `semente.py` | BIP-39: entropia → doze palavras → chave |

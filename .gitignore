@@ -16,3 +16,6 @@ pedaco-*.txt
 
 # Vetores oficiais da BIP-340, baixados do repositorio das BIPs.
 bip340.csv
+
+# Patches de uma vez: aplicados e jogados fora
+patch_*.py
