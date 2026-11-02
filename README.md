@@ -1,7 +1,7 @@
 # Tempest
 
 Uma blockchain escrita do zero em Python, sem nenhuma dependência externa.
-Roda num celular Android, dentro do Termux, em 2493 linhas.
+Roda num celular Android, dentro do Termux, em 2920 linhas.
 
 O `pip install` nunca foi chamado neste projeto. Só a biblioteca padrão do
 Python: `hashlib`, `hmac`, `json`, `secrets`, `http.server`. A curva
@@ -247,6 +247,87 @@ falar por último escolhe o nonce depois de ver os outros, que é o mesmo
 padrão do ataque da chave forjada. E é 2-de-2, não k-de-n: não dá para
 gastar faltando um.
 
+## Quanto custa quebrar uma chave
+
+```bash
+python3 pollard.py curvas      # as curvas pequenas, conferidas na hora
+python3 pollard.py rho 24      # quebra uma chave e conta os passos
+python3 pollard.py lei         # passos / raiz(n): a constante aparece
+python3 pollard.py canguru     # na secp256k1 de verdade
+python3 pollard.py conta       # a extrapolacao para 256 bits
+```
+
+A chave privada é um número `k`; a pública é o ponto `Q = k·G`. Quebrar
+a chave é achar `k` tendo `Q`. Força bruta custa `n` tentativas, onde `n`
+é a ordem do grupo. **Pollard rho custa a raiz de `n`** — e essa raiz é a
+resposta para uma pergunta que quase ninguém faz: por que 256 bits, e não
+128? Porque o melhor ataque conhecido precisa de 2¹²⁸ passos contra uma
+chave de 256 bits. **A secp256k1 tem chave de 256 bits e segurança de
+128.** Metade do número não é desperdício, é o preço do rho.
+
+O passeio guarda um par `(a, b)` com `X = a·G + b·Q` e anda somando um de
+32 saltos sorteados, escolhido pelo próprio `X`. Quando dois pontos do
+passeio coincidem, duas combinações diferentes de `(a, b)` dão o mesmo
+ponto, e aí:
+
+```
+a1 + b1·k = a2 + b2·k   (mod n)
+k = (a1 - a2) / (b2 - b1)
+```
+
+Nenhum palpite sobre `k`, nenhuma busca. Só o fato de o passeio não ter
+para onde fugir: num grupo de `n` elementos bastam uns `√(πn/2)` pontos
+para dois coincidirem — o paradoxo do aniversário.
+
+O `lei` mede isso. Repete o rho em quatro ordens, de 16 a 28 bits, e
+divide os passos pela raiz. A constante **1,2533** aparece sozinha na
+última coluna, sem nunca ter sido escrita no código. Ela cambaleia, porque
+o rho é probabilístico; o expoente não cambaleia nada.
+
+### Na curva do Bitcoin
+
+O `canguru` é o Pollard lambda, e roda na secp256k1 **de verdade** — mesmo
+`G`, mesmos 256 bits. O que muda é a chave: sorteada dentro de um
+intervalo de 28 bits, como numa carteira feita com relógio como semente.
+Dois cangurus pulam para a frente com passos que dependem só de onde cada
+um está; quando o selvagem pisa numa pegada do manso, passa a seguir o
+mesmo caminho, e a diferença das distâncias percorridas é a chave.
+
+Num celular: **268 milhões de chaves possíveis, resolvidas em 7 segundos
+e 30 mil somas de ponto**, sem testar nenhuma delas.
+
+E aqui está o detalhe fino, que fecha o laço com a semente de doze
+palavras. O rho e o canguru só economizam a raiz quando o espaço tem
+estrutura aditiva: um grupo inteiro, ou um trecho contínuo. As doze
+palavras não têm — a PBKDF2 espalha os 2¹²⁸ candidatos pelo grupo sem
+relação aditiva entre eles, e sem estrutura não há atalho: o atacante
+testa um por um. Doze palavras valem 128 bits de segurança de verdade,
+não 64 — e é exatamente o nível da própria curva. Mais entropia na frase
+não compraria nada, porque o rho já limita o outro lado a 2¹²⁸. A BIP-39
+não escolheu 128 bits por acaso.
+
+O que quebra na prática é o contrário: chave num intervalo. É o que são
+os "puzzles" do Bitcoin, e é por isso que eles vão sendo varridos conforme
+a fronteira de bits avança.
+
+### A conta
+
+O `conta` mede as somas de ponto por segundo **nesta máquina** e
+extrapola. Num celular, 4.900 por segundo:
+
+| | |
+|---|---|
+| passos que o rho precisa | 4,27 × 10³⁸ |
+| tempo neste aparelho | 2,75 × 10²⁷ anos |
+| idade do universo | 1,38 × 10¹⁰ anos |
+| a rede inteira do Bitcoin, se cada hash fosse uma soma de ponto | 1,1 vez a idade do universo |
+
+A última linha é a que vale guardar. A segurança de uma assinatura da
+secp256k1 não é "difícil": é todo o poder de cálculo que a humanidade já
+apontou para uma coisa só, rodando desde o Big Bang, e ainda não acabou.
+Nada disso depende de a curva ser bem feita, de o Bitcoin ser popular ou
+de haver dinheiro em jogo. É a raiz quadrada.
+
 ## A semente em pedaços
 
 ```bash
@@ -329,6 +410,7 @@ ele acontece rápido o suficiente para você observar.
 |---|---|
 | `curva.py` | secp256k1 à mão: soma de pontos, multiplicação escalar, endereço |
 | `schnorr.py` | a assinatura da BIP-340 e a soma de chaves da MuSig |
+| `pollard.py` | o rho e o canguru: quanto custa quebrar uma chave |
 | `cadeia.py` | blocos, transações, Merkle, dificuldade, emissão, validação, CLI |
 | `no.py` | o nó HTTP, o consenso, a reorganização e a descoberta de pares |
 | `semente.py` | BIP-39: entropia → doze palavras → chave |
