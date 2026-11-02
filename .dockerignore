@@ -1,0 +1,22 @@
+# O que NUNCA deve entrar numa imagem.
+#
+# A primeira linha e a que importa: imagem e coisa que se empurra para
+# registro, e um 'COPY . .' numa pasta com carteira.json levaria a chave
+# privada junto.
+carteira.json
+carteira-*.json
+pedaco-*.txt
+
+# Estado local: cada no tem o seu, e o no busca a cadeia nos pares.
+cadeia.json
+cadeia-*.json
+pendentes.json
+pares.json
+*.tmp
+
+# Lixo que so aumenta a imagem.
+__pycache__/
+*.pyc
+.git/
+patch_*.py
+bip340.csv
