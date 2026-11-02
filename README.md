@@ -133,6 +133,27 @@ quem encontra. Você apresenta ele a **um** par; o resto ele descobre
 sozinho. Três nós, apresentando C só a B, e C aprende A na primeira
 conversa. É só isso que "descentralizado" significa na prática.
 
+## A tela
+
+```bash
+python3 tela.py      # depois abra http://127.0.0.1:5050
+```
+
+A carteira no navegador: saldo, mineração, envio, emissão e a cadeia. Um
+arquivo, sem CDN, sem fonte baixada, sem framework — funciona com o
+aparelho em modo avião.
+
+O herói da tela não é o saldo, é o hash do topo da cadeia com os zeros à
+esquerda destacados. Aqueles zeros são a dificuldade, e são a única coisa
+ali que custou alguma coisa. Carteira de verdade esconde isso; aqui é o
+ponto.
+
+`tela.py` é um programa separado do `no.py` de propósito. Estas rotas
+assinam com a chave privada e mineram para o seu endereço, então o
+servidor se amarra em `127.0.0.1` e recusa qualquer cliente que não seja a
+própria máquina. O `no.py`, que atende a rede em `0.0.0.0`, não tem
+nenhuma rota que toque na chave.
+
 ## A semente de doze palavras
 
 A chave privada é um número de 256 bits. Perder o arquivo que a guarda é
@@ -199,6 +220,7 @@ ele acontece rápido o suficiente para você observar.
 | `cadeia.py` | blocos, transações, Merkle, dificuldade, emissão, validação, CLI |
 | `no.py` | o nó HTTP, o consenso, a reorganização e a descoberta de pares |
 | `semente.py` | BIP-39: entropia → doze palavras → chave |
+| `tela.py` | a carteira no navegador, servida só para a própria máquina |
 | `palavras.txt` | a lista oficial de 2048 palavras em português |
 
 Estado em disco, tudo ignorado pelo git:
