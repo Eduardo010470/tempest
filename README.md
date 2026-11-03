@@ -245,8 +245,9 @@ uma linguagem escreve um número: o mesmo instante com uma casa decimal a
 mais dava outro hash, e dois nós honestos discordariam sem ninguém ter
 errado. Com campo de tamanho fixo, qualquer programa em qualquer
 linguagem chega ao mesmo hash — dá para conferir com `sha256sum` sobre os
-88 bytes crus, sem Python nenhum. As transações seguem a mesma regra: 116
-bytes fixos é o que a assinatura protege.
+88 bytes crus, sem Python nenhum. As transações seguem a mesma regra: 84
+bytes fixos é o que a assinatura protege — 32 da chave pública, 20 do
+endereço, e quatro campos de 8.
 
 ## As assinaturas são Schnorr
 

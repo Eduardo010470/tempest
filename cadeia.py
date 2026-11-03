@@ -172,7 +172,11 @@ def tempo_mediano(cadeia, indice):
 # ------------------------------------------------------------- transacoes
 
 def corpo_tx(tx):
-    """Os bytes exatos que a assinatura protege. 116 bytes, sempre.
+    """Os bytes exatos que a assinatura protege. 84 bytes, sempre.
+
+    32 da chave publica, 20 do endereco, e quatro campos de 8 bytes.
+    Eram 116 ate a cadeia passar ao Schnorr: a chave publica tinha 64
+    bytes, x e y, e a BIP-340 guarda so o x.
 
     NAO use json aqui. A forma canonica de uma transacao nao pode depender
     de como o serializador de uma linguagem escreve um numero: outro
@@ -180,7 +184,7 @@ def corpo_tx(tx):
     transacao e calcularia outro hash. Campo de tamanho fixo, big-endian,
     e a mesma coisa em qualquer maquina que saiba contar.
     """
-    return (bytes.fromhex(tx["de"])                    # 64: a chave publica
+    return (bytes.fromhex(tx["de"])                    # 32: a chave publica
             + bytes.fromhex(tx["para"])                # 20: o endereco
             + tx["valor"].to_bytes(8, "big")
             + tx["taxa"].to_bytes(8, "big")
