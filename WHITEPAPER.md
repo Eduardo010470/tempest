@@ -518,11 +518,17 @@ reward(i) = 50 >> (i // 20)
 | Initial reward | 50 TEMP |
 | Halving | every 20 blocks |
 | Last block with a reward | 119 (reward: 1 TEMP) |
-| Total ever issued | 1,890 TEMP |
+| Total ever issued | 1,890 TEMP (see below) |
 | Fee | set by the sender, paid to the miner |
 
 The genesis block contains no transactions and therefore issues nothing; the
 total above sums heights 1 through 119.
+
+**That total is a rounding artifact.** The geometric sum of 50 halving every
+20 blocks is 50 × 20 × 2 = 2,000, less the 50 of the non-issuing genesis:
+**1,950 TEMP**. The chain creates 1,890. The missing 60 — 3.1% of the intended
+supply — were eaten by integer truncation, because `50 >> 2` yields 12 where
+the curve calls for 12.5, and so on at every halving. See §12.15.
 
 These numbers are small on purpose: a reader sees a halving in minutes and the
 end of issuance in an afternoon. In Bitcoin the halving is every four years and
@@ -671,7 +677,27 @@ Scope choices are in §1.2. These are weaknesses.
 14. **Bounded difficulty.** Clamping difficulty to [3, 7] bounds the work any
     block can carry, so the chain cannot become arbitrarily expensive to rewrite
     regardless of how much hash power joins.
-15. **The token.** TEMP has no price, no market and no path to either. Section
+15. **No subdivision.** A value is an integer number of TEMP. There is no
+    decimal place, no base unit, no satoshi. Bitcoin does not have 21 million
+    units; it has 2.1 × 10¹⁵ satoshis, and "1 BTC" is a display convention.
+    Tempest has 1,890 indivisible units — twelve orders of magnitude less
+    granularity — and this is measurable, not theoretical:
+
+    - The minimum fee of 1 TEMP is **0.053% of the entire supply**. A
+      proportionally equal fee in Bitcoin would be about 11,000 BTC.
+    - The halving truncates at whole coins, so the issuance curve loses money
+      at every step: 50, 25, 12, 6, 3, 1. The twelve should be 12.5.
+    - **60 TEMP of 1,950 do not exist** (§10). Three per cent of the money was
+      destroyed by rounding before anyone spent anything.
+
+    The fix is the one Bitcoin made: declare 1 TEMP = 10⁸ base units, store
+    every amount in base units and divide only for display. It costs three
+    constants and a chain reset, and it costs nothing pedagogically — the
+    halving would still arrive in a minute. It is listed here rather than
+    applied because the chain is live and the defect teaches something while
+    it stands.
+
+16. **The token.** TEMP has no price, no market and no path to either. Section
     15 explains why this is not a problem awaiting a solution.
 
 ---
