@@ -134,6 +134,60 @@ quem encontra. Você apresenta ele a **um** par; o resto ele descobre
 sozinho. Três nós, apresentando C só a B, e C aprende A na primeira
 conversa. É só isso que "descentralizado" significa na prática.
 
+## O no semente
+
+```bash
+curl https://web-production-a3ca95.up.railway.app/estado
+python3 no.py conhecer https://web-production-a3ca95.up.railway.app
+python3 no.py rodada
+```
+
+Um nó recém-instalado não conhece ninguém, e não existe jeito de
+descobrir por conta própria quem está no ar. Então a lista começa escrita
+no código, em `PARES_SEMENTE`. É a única parte de uma blockchain que não
+é matemática: um endereço que alguém precisa manter de pé. O Bitcoin tem
+cinco desses — os *DNS seeds* — e nunca conseguiu se livrar de nenhum.
+
+Repara no que o nó semente **não** pode fazer. Não pode mentir sobre a
+cadeia, porque a gênese é constante e a validação é integral: se mandar
+outra história, ela é recusada por mais trabalho que traga. Não pode
+inventar pares, porque quem ele indica se apresenta sozinho ou não é
+falado com. Não pode gastar moeda de ninguém, porque não tem chave. O pior
+que um nó semente consegue fazer é **não responder**.
+
+E ele não precisa de backup. O sistema de arquivos do servidor é
+efêmero: a cada deploy o nó perde `cadeia.json`, `pendentes.json` e
+`pares.json`. Está certo assim — ele sobe, lê o `PARES_SEMENTE`, pede a
+cadeia aos pares, e a validação decide. Foi isso que a gênese constante
+comprou, e só aqui deu para ver o troco.
+
+Para atender estranhos 24 horas faltavam coisas que um nó na sua mão
+nunca precisou:
+
+| | |
+|---|---|
+| `ThreadingHTTPServer` | um cliente lento travava todos os outros |
+| tranca reentrante na cadeia e na fila | dois POST simultâneos liam o mesmo arquivo, e o último a gravar apagava a decisão do outro |
+| teto de 8 MB no POST | um `Content-Length` mentiroso derrubava o processo por memória |
+| gravação atômica (`.tmp` + `os.replace`) | `open(arquivo, "w")` trunca na hora: processo morto no meio de um deploy deixava um JSON cortado, e o nó não voltava a subir |
+| rodada automática num fio de fundo | um nó que só escuta fica atrás e nunca descobre sozinho |
+| número do ambiente lido sem `int()` cru | um `TEMPEST_RODADA=60=` derrubou o nó de verdade: um sinal de igual a mais, e o processo morria antes de abrir a porta |
+
+A última linha custou um deploy para aparecer, e é a mais geral das seis.
+Um programa que você roda na mão pode morrer com um erro na cara: você lê,
+conserta, roda de novo. Um processo que atende sozinho num servidor não
+tem esse luxo — cada jeito de morrer é um jeito de a rede sumir enquanto
+ninguém olha. Mas ele também não deve adivinhar: tirar o `=` e supor que a
+intenção era 60 seria pior, porque aí o nó roda com um valor que ninguém
+escreveu. Ele avisa e segue com o padrão.
+
+O nó semente **não minera**. Se minerasse, seria o único minerador e
+ficaria com todas as moedas.
+
+Um nó atrás de NAT — um celular, por exemplo — não deve se anunciar: não
+tem endereço que os outros alcancem. Deixe o `sou` vazio e ele só procura,
+sem prometer um endereço que não atende.
+
 ## A tela
 
 ```bash
@@ -437,8 +491,9 @@ Para não haver ilusão sobre o escopo:
 - **BIP-32.** Uma chave por semente, não uma árvore.
 - **Scripts e contratos.** As transações só transferem valor.
 - **Privacidade.** Os endereços são públicos e ligáveis, como no Bitcoin.
-- **Rede pública.** Os nós se descobrem entre si, mas não há nó semente
-  inicial no ar em lugar nenhum.
+- **Rede robusta.** Existe um nó semente no ar, mas é **um**, mantido por
+  uma pessoa, num plano gratuito. Rede de verdade tem vários, em máquinas
+  e jurisdições diferentes, e nenhum deles indispensável.
 
 ## Por que isso existe
 

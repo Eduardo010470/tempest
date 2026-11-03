@@ -75,9 +75,33 @@ MAX_CORPO = 8 * 1024 * 1024      # teto do POST
 # Os nos que um no recem-instalado conhece sem ninguem apresentar.
 # Enquanto estiver vazio, cada no precisa de um 'conhecer' na mao.
 PARES_SEMENTE = [
+    "https://web-production-a3ca95.up.railway.app",
 ]
 PARES_SEMENTE += [p.strip() for p in
                   os.environ.get("TEMPEST_SEMENTE", "").split(",") if p.strip()]
+
+def inteiro(nome, padrao):
+    """Le um numero do ambiente sem derrubar o processo.
+
+    Um 'TEMPEST_RODADA=60=' ja matou este no: int('60=') levanta
+    ValueError, e o no morreu antes de abrir a porta. Num processo que
+    roda sozinho num servidor, variavel mal digitada tem que virar AVISO,
+    nao morte — ninguem esta olhando para reiniciar.
+
+    E nao tenta consertar o que foi escrito. Nada de tirar o '=' e supor
+    que a pessoa queria 60: um no que adivinha a intencao do operador e
+    pior que um que recusa e diz o que recusou.
+    """
+    bruto = (os.environ.get(nome) or "").strip()
+    if not bruto:
+        return padrao
+    try:
+        return int(bruto)
+    except ValueError:
+        print("aviso: %s=%r nao e um numero inteiro. seguindo com %d."
+              % (nome, bruto, padrao))
+        return padrao
+
 
 # Uma tranca so, para a cadeia e para a fila. Enquanto o no atendia um
 # cliente de cada vez ela nao fazia falta. Agora faz: dois POST /cadeia
@@ -309,8 +333,8 @@ def main():
     elif cmd == "servir":
         if os.environ.get("TEMPEST_DIR"):
             os.chdir(os.environ["TEMPEST_DIR"])
-        porta = int(os.environ.get("PORT")
-                    or (sys.argv[2] if len(sys.argv) > 2 else 5000))
+        porta = inteiro("PORT",
+                        int(sys.argv[2]) if len(sys.argv) > 2 else 5000)
 
         # como este no se apresenta. num servidor isso nao pode ser
         # digitado a mao, e o Railway publica o dominio no ambiente.
@@ -341,7 +365,7 @@ def main():
         print("rotas: GET /estado /cadeia /pendentes /pares"
               " | POST /cadeia /pendentes /pares")
 
-        intervalo = int(os.environ.get("TEMPEST_RODADA", "0"))
+        intervalo = inteiro("TEMPEST_RODADA", 0)
         if intervalo > 0:
             threading.Thread(target=laco_rodadas, args=(intervalo,),
                              daemon=True).start()
