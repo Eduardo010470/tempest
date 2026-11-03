@@ -698,7 +698,7 @@ Scope choices are in §1.2. These are weaknesses.
     it stands.
 
 16. **The token.** TEMP has no price, no market and no path to either. Section
-    15 explains why this is not a problem awaiting a solution.
+    16 explains why this is not a problem awaiting a solution.
 
 ---
 
